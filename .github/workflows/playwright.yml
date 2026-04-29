@@ -3,10 +3,15 @@ name: Playwright Tests
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 jobs:
   test:
-    timeout-minutes: 60
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -21,28 +26,42 @@ jobs:
         run: npm ci
 
       - name: Create .env file from GitHub secret
+        run: printf '%s' "${{ secrets.E2E_ENV_FILE }}" > .env
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Run E2E tests
+        run: npx playwright test
+
+      # Prepare Playwright report for GitHub Pages deployment
+      - name: Prepare Playwright report for GitHub Pages
+        if: ${{ !cancelled() }}
         run: |
-          printf '%s' "${{ secrets.E2E_ENV_FILE }}" > .env
+          mkdir public
+          cp -r playwright-report/* public/
 
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
-
-      - name: Run E2E tests in Chromium
-        run: npx playwright test --project=chromium
-
-      - name: Upload Playwright HTML report
-        uses: actions/upload-artifact@v4
+      # Upload report as an artifact for GitHub Pages
+      - name: Upload Pages artifact
         if: ${{ !cancelled() }}
+        uses: actions/upload-pages-artifact@v3
         with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 30
+          path: public
 
-      - name: Upload Playwright raw results
-        uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
-        with:
-          name: playwright-test-results
-          path: test-results/
-          if-no-files-found: ignore
-          retention-days: 30
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      # Deploy prepared report to GitHub Pages
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
